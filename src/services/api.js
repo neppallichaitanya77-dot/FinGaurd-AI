@@ -72,7 +72,11 @@ export const recommendationsAPI = {
 };
 
 export const aiAPI = {
-  chat: (message) => api.post('/ai/chat', { message }),
+  chat: (message, conversationId, previousSuggestedQuestions = []) => api.post('/ai/chat', {
+    message,
+    conversation_id: conversationId,
+    previous_suggested_questions: previousSuggestedQuestions,
+  }),
   getHistory: () => api.get('/ai/history'),
 };
 

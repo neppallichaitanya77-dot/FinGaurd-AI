@@ -32,7 +32,7 @@ export default function AIChat({ onSendMessage, messages = [], loading = false }
               {['Why is my risk score high?', 'How can I reduce my debt?', 'What is affecting my health score?'].map((q) => (
                 <button
                   key={q}
-                  onClick={() => { setInput(q); }}
+                  onClick={() => onSendMessage(q)}
                   className="px-3 py-1.5 text-xs text-brand-600 bg-brand-50 rounded-full hover:bg-brand-100 transition-colors"
                 >
                   {q}
@@ -43,7 +43,7 @@ export default function AIChat({ onSendMessage, messages = [], loading = false }
         )}
 
         {messages.map((msg, i) => (
-          <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          <div key={i} className={`flex flex-wrap gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             {msg.role === 'assistant' && (
               <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center flex-shrink-0">
                 <Bot className="w-4 h-4 text-brand-600" />
@@ -59,6 +59,21 @@ export default function AIChat({ onSendMessage, messages = [], loading = false }
             {msg.role === 'user' && (
               <div className="w-8 h-8 rounded-full bg-brand-600 flex items-center justify-center flex-shrink-0">
                 <User className="w-4 h-4 text-white" />
+              </div>
+            )}
+            {msg.role === 'assistant' && msg.suggested_questions?.length > 0 && (
+              <div className="basis-full ml-11 -mt-1 flex flex-wrap gap-2">
+                {msg.suggested_questions.map((question) => (
+                  <button
+                    key={question}
+                    type="button"
+                    onClick={() => onSendMessage(question)}
+                    disabled={loading}
+                    className="px-3 py-1.5 text-xs text-brand-700 bg-brand-50 border border-brand-100 rounded-full hover:bg-brand-100 disabled:opacity-50"
+                  >
+                    {question}
+                  </button>
+                ))}
               </div>
             )}
           </div>

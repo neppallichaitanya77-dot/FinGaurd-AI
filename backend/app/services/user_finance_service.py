@@ -80,23 +80,13 @@ def get_chart_data(db: Session, user_id: str) -> Dict:
     days = 30
     balance_chart = []
     current = balance
-    # Build a plausible 30-day balance series anchored at today's balance.
-    points = []
-    for i in range(days, 0, -1):
-        day = now - timedelta(days=i)
-        points.append(day)
-    reverse = balance
-    # We'll generate a backdated series and ensure the last point == current balance
-    import random
-
-    random.seed(7)
-    series = [balance]
-    for _ in range(days):
-        series.append(series[-1] + random.choice([-400, -200, 100, 300, -500]))
-    series.reverse()
-    for i, day in enumerate(points):
-        balance_chart.append({"date": day.strftime("%Y-%m-%d"), "balance": round(series[min(i, len(series) - 1)], 0)})
-    balance_chart.append({"date": now.strftime("%Y-%m-%d"), "balance": round(balance, 0)})
+    for transaction in sorted(txns, key=lambda item: item.date):
+        balance_chart.append({
+            "date": transaction.date.strftime("%Y-%m-%d"),
+            "balance": round(transaction.balance, 0),
+        })
+    if not balance_chart or balance_chart[-1]["date"] != now.strftime("%Y-%m-%d"):
+        balance_chart.append({"date": now.strftime("%Y-%m-%d"), "balance": round(balance, 0)})
 
     # Expense chart by month (last 5 months)
     expense_chart = {}

@@ -21,16 +21,23 @@ class ScenarioOutput(BaseModel):
     risk_score: int
     risk_level: str
     financial_health_score: int
-    risk_factors: List[RiskFactorOut] = []
-    recommendations: List[str] = []
+    risk_factors: List[RiskFactorOut] = Field(default_factory=list)
+    recommendations: List[str] = Field(default_factory=list)
 
 
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
+    conversation_id: Optional[str] = None
+    previous_suggested_questions: List[str] = Field(default_factory=list, max_length=4)
 
 
 class ChatResponse(BaseModel):
     response: str
+    answer: str
+    conversation_id: str
+    suggested_questions: List[str] = Field(default_factory=list)
+    source: str = "fallback"
+    status: str = "FALLBACK_RESPONSE"
 
 
 class ErrorResponse(BaseModel):

@@ -28,7 +28,7 @@ app = FastAPI(
 )
 
 # CORS - allow configured frontend origins
-origins = settings.BACKEND_CORS_ORIGINS
+origins = list(settings.BACKEND_CORS_ORIGINS)
 if settings.FRONTEND_URL and settings.FRONTEND_URL not in origins:
     origins.append(settings.FRONTEND_URL)
 

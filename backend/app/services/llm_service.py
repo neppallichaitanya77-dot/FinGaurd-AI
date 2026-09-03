@@ -6,11 +6,14 @@ actual financial context. This guarantees the application never crashes when
 the LLM API is unavailable.
 """
 import json
-from typing import Dict
+import logging
+import re
+from typing import Dict, List, Optional
 
 from app.core.config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 SAFETY_DISCLAIMER = (
     "FinGuard AI provides supportive guidance, not financial advice. "
@@ -38,6 +41,145 @@ Provide a clear, empathetic, and concise answer (max 200 words). End with the
 following disclaimer exactly:
 {SAFETY_DISCLAIMER}
 """
+
+
+def _normalise_question(question: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", question.lower()).strip()
+
+
+def _topic_for_question(user_question: str, assistant_response: str, context: Dict) -> str:
+    question = f"{user_question} {assistant_response}".lower()
+    if any(word in question for word in ("emi", "loan", "repay", "installment")):
+        return "loan"
+    if any(word in question for word in ("budget", "expense", "spend", "saving")):
+        return "budget"
+    if any(word in question for word in ("credit", "utilization", "card")):
+        return "credit"
+    if any(word in question for word in ("risk", "score", "health", "factor")):
+        return "risk"
+    if context.get("risk_level") in {"HIGH", "CRITICAL"}:
+        return "risk"
+    return "general"
+
+
+def _fallback_question_sets(topic: str, context: Dict) -> List[str]:
+    sets = {
+        "risk": [
+            "What factor is increasing my risk the most?",
+            "How can I improve my financial health?",
+            "How is my risk score calculated?",
+            "What would lower my risk level?",
+            "Can you explain my biggest risk factor?",
+            "What should I focus on first?",
+        ],
+        "credit": [
+            "How can I reduce my credit utilization?",
+            "How much should I pay toward my balance?",
+            "What credit card spending should I review first?",
+            "Will lowering utilization improve my risk score?",
+            "How does credit utilization affect my health score?",
+            "Can you help me make a credit repayment plan?",
+        ],
+        "loan": [
+            "How can I plan my upcoming EMI payments?",
+            "What should I consider before making an extra payment?",
+            "Can you help me review my loan obligations?",
+            "How can I prepare for my next EMI?",
+            "What would make my EMI easier to manage?",
+            "How do loan payments affect my financial health?",
+        ],
+        "budget": [
+            "Which expenses should I review first?",
+            "Can you help me create a monthly budget?",
+            "How can I increase my monthly savings?",
+            "How should I divide my income across expenses?",
+            "What spending categories should I track?",
+            "What happens if I reduce my expenses by 10%?",
+        ],
+        "general": [
+            "What should I focus on first?",
+            "Can you explain my main financial indicators?",
+            "What happens if my expenses increase?",
+            "How can I prepare for upcoming payments?",
+            "Which financial trend should I monitor next?",
+            "Can you help me explore a different scenario?",
+        ],
+    }
+    return sets[topic]
+
+
+def generate_followup_questions(
+    user_question: str,
+    assistant_response: str,
+    context: Dict,
+    previous_questions: Optional[List[str]] = None,
+) -> List[str]:
+    """Generate three relevant, deduplicated follow-ups without inventing facts."""
+    previous = previous_questions or []
+    blocked = {_normalise_question(user_question)}
+    blocked.update(_normalise_question(item) for item in previous)
+    blocked.update(
+        _normalise_question(message.get("content", ""))
+        for message in context.get("conversation", [])
+    )
+    questions = []
+    candidates = _llm_followup_questions(user_question, assistant_response, context) or _fallback_question_sets(
+        _topic_for_question(user_question, assistant_response, context), context
+    )
+    for question in candidates:
+        normalised = _normalise_question(question)
+        if normalised and normalised not in blocked:
+            questions.append(question)
+            blocked.add(normalised)
+        if len(questions) == 3:
+            break
+    return questions
+
+
+def _llm_followup_questions(
+    user_question: str, assistant_response: str, context: Dict
+) -> List[str]:
+    """Request structured follow-ups when an LLM is configured; otherwise return none."""
+    if not settings.LLM_ENABLED or not settings.LLM_API_KEY:
+        return []
+    try:
+        import urllib.request
+
+        prompt = {
+            "user_question": user_question,
+            "assistant_response": assistant_response,
+            "financial_context": context,
+        }
+        request = urllib.request.Request(
+            f"{settings.LLM_API_BASE_URL}/chat/completions",
+            data=json.dumps({
+                "model": settings.LLM_MODEL,
+                "messages": [{
+                    "role": "system",
+                    "content": (
+                        "You are a responsible financial-support assistant. Return JSON only "
+                        "with a suggested_questions array containing 3 concise, practical "
+                        "questions. Use only the supplied context, do not repeat the current "
+                        "question, and do not make financial decisions."
+                    ),
+                }, {"role": "user", "content": json.dumps(prompt)}],
+                "temperature": 0.3,
+                "max_tokens": 180,
+            }).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {settings.LLM_API_KEY}",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            content = json.loads(response.read().decode("utf-8"))["choices"][0]["message"]["content"]
+        parsed = json.loads(content)
+        questions = parsed.get("suggested_questions", [])
+        if isinstance(questions, list):
+            return [question.strip() for question in questions if isinstance(question, str) and question.strip()][:4]
+    except Exception:
+        return []
+    return []
 
 
 def call_llm(user_question: str, context: Dict) -> str:
@@ -88,9 +230,26 @@ def fallback_explanation(user_question: str, context: Dict) -> str:
     balance_trend = context.get("balance_trend", "STABLE")
     upcoming_emi = context.get("upcoming_emi", 0)
     health = context.get("health_score", 0)
+    total_debt = context.get("total_debt", 0)
+    payment_delays = context.get("payment_delays", 0)
+    expense_trend = context.get("expense_trend", 0)
     factors = context.get("risk_factors", [])
+    conversation = context.get("conversation", [])
 
     factor_text = ", ".join(f["name"] for f in factors) if factors else "no major factors"
+
+    if any(word in q for word in ("it", "that", "this")) and conversation:
+        prior_text = " ".join(message.get("content", "") for message in conversation[-4:]).lower()
+        if any(word in prior_text for word in ("risk", "score", "health")):
+            q += " risk score"
+
+    if "health" in q:
+        return (
+            f"Your financial health score is {health}/100. It reflects your balance, income, expenses, debt, "
+            f"credit utilization, and payment behavior. The current risk level is {risk_level}, with utilization "
+            f"at {utilization:.0f}% and a {balance_trend.lower()} balance trend. Reviewing the factors that are "
+            "pulling the score down can help you choose practical next steps. " + SAFETY_DISCLAIMER
+        )
 
     if "risk" in q and ("high" in q or "why" in q or "score" in q):
         return (
@@ -100,12 +259,19 @@ def fallback_explanation(user_question: str, context: Dict) -> str:
             "meaningfully improve your position over time. " + SAFETY_DISCLAIMER
         )
 
-    if "debt" in q and ("reduce" in q or "lower" in q):
+    if "credit utilization" in q or "what is credit utilization" in q:
         return (
-            "To reduce debt, consider: 1) Prioritizing high-interest debt first, "
-            "2) Avoiding new debt while repaying, 3) Consolidating multiple loans, "
-            "4) Setting up automatic payments to avoid missed EMIs, and "
-            "5) Reviewing your budget to free up repayment capacity. " + SAFETY_DISCLAIMER
+            f"Credit utilization is the percentage of your available revolving credit that you are using. "
+            f"Your current utilization is {utilization:.0f}%. Lowering balances or avoiding unnecessary new charges "
+            "can reduce it; review the statement balances and payment dates that affect the calculation. "
+            + SAFETY_DISCLAIMER
+        )
+
+    if "debt" in q:
+        return (
+            f"Your tracked outstanding debt is ₹{total_debt:,.0f}. To reduce it, list each obligation and its interest rate, "
+            "prioritize the highest-cost balance while keeping required payments current, and direct any affordable extra "
+            "amount toward that balance. Review your budget first so the plan remains sustainable. " + SAFETY_DISCLAIMER
         )
 
     if "warning" in q or "alert" in q or "why did i receive" in q:
@@ -124,7 +290,7 @@ def fallback_explanation(user_question: str, context: Dict) -> str:
             "around the due date. " + SAFETY_DISCLAIMER
         )
 
-    if "health" in q or "score" in q:
+    if "score" in q:
         return (
             f"Your financial health score is {health}/100. This reflects your current "
             "balance, income, expenses, debt, and utilization patterns. Your key indicators "
@@ -132,25 +298,48 @@ def fallback_explanation(user_question: str, context: Dict) -> str:
             "Improvements in these areas typically raise your score over time. " + SAFETY_DISCLAIMER
         )
 
-    if "balance" in q or "income" in q or "expense" in q:
+    if "what happens" in q and ("expense" in q or "spend" in q):
         return (
-            f"Your balance trend is currently {balance_trend}, with credit utilization at "
-            f"{utilization:.0f}%. Monitoring income versus expenses regularly helps keep "
-            "your finances on track. " + SAFETY_DISCLAIMER
+            f"If your expenses increase while monthly income stays at ₹{context.get('monthly_income', 0):,.0f}, "
+            "the amount available for savings and required payments will shrink. Because your recent expense trend is "
+            f"{expense_trend:+.1f}% and your balance trend is {balance_trend.lower()}, review the new spending first, "
+            "protect essential payments, and test the change in the scenario simulator before committing to it. "
+            + SAFETY_DISCLAIMER
+        )
+
+    if "budget" in q or "expense" in q or "spend" in q or "saving" in q:
+        return (
+            f"Your tracked monthly income is ₹{context.get('monthly_income', 0):,.0f}, and your recent expense trend is "
+            f"{expense_trend:+.1f}%. Start by grouping recent spending into needs, debt payments, and discretionary items. "
+            "Set a realistic limit for discretionary spending and review it weekly while protecting required payments. "
+            + SAFETY_DISCLAIMER
         )
 
     return (
-        "I can help you understand your financial situation, risk indicators, and "
-        "personalized suggestions. Some helpful questions: Why is my risk score what it is? "
-        "How can I reduce my debt? How can I manage my upcoming EMI? " + SAFETY_DISCLAIMER
+        f"I can help with that question. Your current risk level is {risk_level}, your balance trend is "
+        f"{balance_trend.lower()}, and you have {payment_delays} recorded payment delay(s). "
+        "Please ask about a specific score, balance, debt, payment, expense, or financial concept so I can relate the explanation "
+        "to the information available. " + SAFETY_DISCLAIMER
     )
 
 
 def generate_response(user_question: str, context: Dict) -> str:
     """High-level entry point: try the LLM, fall back to the explanation engine."""
+    return generate_response_details(user_question, context)["response"]
+
+
+def generate_response_details(user_question: str, context: Dict) -> Dict[str, str]:
+    """Return the answer and an explicit provider status for development diagnostics."""
     try:
         if settings.LLM_ENABLED and settings.LLM_API_KEY:
-            return call_llm(user_question, context)
+            response = call_llm(user_question, context)
+            logger.info("AI response status=LLM_SUCCESS")
+            return {"response": response, "source": "llm", "status": "LLM_SUCCESS"}
+        logger.info("AI response status=LLM_UNAVAILABLE reason=not_configured")
     except Exception:
-        pass
-    return fallback_explanation(user_question, context)
+        logger.exception("LLM request failed; using contextual fallback")
+    return {
+        "response": fallback_explanation(user_question, context),
+        "source": "fallback",
+        "status": "FALLBACK_RESPONSE",
+    }

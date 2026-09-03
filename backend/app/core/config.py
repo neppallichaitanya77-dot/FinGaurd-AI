@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,6 +36,18 @@ class Settings(BaseSettings):
     AUTO_SEED: bool = True
     DEMO_USER_EMAIL: str = "demo@finguard.ai"
     DEMO_USER_PASSWORD: str = "demo123"
+
+    @model_validator(mode="after")
+    def validate_security_settings(self):
+        if self.ENVIRONMENT == "production" and self.JWT_SECRET_KEY in {
+            "",
+            "change-me-in-production",
+            "please-change-this-secret-key",
+        }:
+            raise ValueError("JWT_SECRET_KEY must be configured in production")
+        return self
+
+    ENVIRONMENT: str = "development"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

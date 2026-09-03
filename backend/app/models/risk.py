@@ -79,6 +79,7 @@ class AIConversation(Base):
 
     id = Column(String(36), primary_key=True, default=gen_id)
     user_id = Column(String(36), ForeignKey("users.id"), index=True, nullable=False)
+    conversation_id = Column(String(36), index=True, nullable=True)
     role = Column(String(20), nullable=False)  # user | assistant
     message = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)

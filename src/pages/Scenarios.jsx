@@ -13,46 +13,11 @@ const defaultScenario = {
   payment_delays: 1,
 };
 
-function calculateLocalRisk(data) {
-  let riskScore = 0;
-  const factors = [];
-
-  const dti = ((data.monthly_expenses + data.upcoming_emi) / data.monthly_income) * 100;
-  if (dti > 60) { riskScore += 25; factors.push({ name: 'High Debt-to-Income Ratio', value: `${dti.toFixed(0)}%`, impact: 'HIGH' }); }
-  else if (dti > 40) { riskScore += 15; factors.push({ name: 'Elevated Debt-to-Income Ratio', value: `${dti.toFixed(0)}%`, impact: 'MEDIUM' }); }
-
-  if (data.credit_utilization > 70) { riskScore += 25; factors.push({ name: 'High Credit Utilization', value: `${data.credit_utilization}%`, impact: 'HIGH' }); }
-  else if (data.credit_utilization > 40) { riskScore += 12; factors.push({ name: 'Modererate Credit Utilization', value: `${data.credit_utilization}%`, impact: 'MEDIUM' }); }
-
-  if (data.payment_delays > 3) { riskScore += 25; factors.push({ name: 'Frequent Payment Delays', value: `${data.payment_delays} delays`, impact: 'HIGH' }); }
-  else if (data.payment_delays > 0) { riskScore += 10; factors.push({ name: 'Payment Delays Detected', value: `${data.payment_delays} delay(s)`, impact: 'MEDIUM' }); }
-
-  const savingsRate = ((data.monthly_income - data.monthly_expenses) / data.monthly_income) * 100;
-  if (savingsRate < 10) { riskScore += 15; factors.push({ name: 'Low Savings Rate', value: `${savingsRate.toFixed(0)}%`, impact: 'MEDIUM' }); }
-
-  if (data.outstanding_debt > data.monthly_income * 24) { riskScore += 10; factors.push({ name: 'High Debt Burden', value: formatCurrency(data.outstanding_debt), impact: 'MEDIUM' }); }
-
-  riskScore = Math.min(riskScore, 100);
-
-  let riskLevel = 'LOW';
-  if (riskScore > 60) riskLevel = 'HIGH';
-  else if (riskScore > 30) riskLevel = 'MEDIUM';
-
-  const healthScore = Math.max(100 - riskScore, 0);
-
-  const recommendations = [];
-  if (data.credit_utilization > 40) recommendations.push('Reduce credit utilization below 30%');
-  if (dti > 40) recommendations.push('Work on reducing your debt-to-income ratio');
-  if (data.payment_delays > 0) recommendations.push('Set up automatic payments to avoid future delays');
-  if (savingsRate < 20) recommendations.push('Try to save at least 20% of your income');
-
-  return { risk_score: riskScore, risk_level: riskLevel, health_score: healthScore, risk_factors: factors, recommendations };
-}
-
 export default function Scenarios() {
   const [scenario, setScenario] = useState(defaultScenario);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const handleChange = (field, value) => {
     setScenario((prev) => ({ ...prev, [field]: Number(value) }));
@@ -60,11 +25,12 @@ export default function Scenarios() {
 
   const handleAnalyze = async () => {
     setLoading(true);
+    setError('');
     try {
       const res = await scenarioAPI.analyze(scenario);
       setResult(res.data?.data || res.data);
-    } catch {
-      setResult(calculateLocalRisk(scenario));
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Unable to analyze this scenario. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -132,6 +98,7 @@ export default function Scenarios() {
           >
             {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Play className="w-5 h-5" /> Analyze Scenario</>}
           </button>
+          {error && <p className="mt-3 text-sm text-red-600" role="alert">{error}</p>}
         </div>
 
         <div>

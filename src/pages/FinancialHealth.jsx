@@ -8,45 +8,10 @@ import ExpenseChart from '../components/ExpenseChart';
 import DebtChart from '../components/DebtChart';
 import LoadingSpinner from '../components/LoadingSpinner';
 
-const DEMO_DATA = {
-  health_score: 72,
-  health_status: 'Good',
-  balance: 85400,
-  income: 45000,
-  expenses: 31500,
-  debt: 125000,
-  credit_utilization: 64,
-  upcoming_emi: 8500,
-  positive_factors: [
-    'Consistent monthly income',
-    'No missed payments in the last 6 months',
-    'Diversified expense categories',
-  ],
-  concerns: [
-    'Credit utilization is above the recommended 30% threshold',
-    'Monthly expenses are trending upward',
-    'Balance has been declining over the past 30 days',
-  ],
-  balance_chart: Array.from({ length: 30 }, (_, i) => ({
-    date: `2026-08-${String(i + 1).padStart(2, '0')}`,
-    balance: 95000 - i * 350 + Math.floor(Math.random() * 5000),
-  })),
-  expense_chart: [
-    { month: 'Apr', income: 45000, expenses: 28000 },
-    { month: 'May', income: 45000, expenses: 30200 },
-    { month: 'Jun', income: 45000, expenses: 29500 },
-    { month: 'Jul', income: 45000, expenses: 31000 },
-    { month: 'Aug', income: 45000, expenses: 31500 },
-  ],
-  debt_chart: Array.from({ length: 30 }, (_, i) => ({
-    date: `2026-08-${String(i + 1).padStart(2, '0')}`,
-    debt: 120000 + i * 170 + Math.floor(Math.random() * 2000),
-  })),
-};
-
 export default function FinancialHealth() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [timeRange, setTimeRange] = useState('30d');
 
   useEffect(() => {
@@ -57,15 +22,26 @@ export default function FinancialHealth() {
     try {
       const res = await financialHealthAPI.getHealth();
       setData(res.data?.data || res.data);
-    } catch {
-      setData(DEMO_DATA);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Unable to load financial health. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   if (loading) return <div className="flex-1 p-8"><LoadingSpinner text="Loading financial health..." /></div>;
-  const d = data || DEMO_DATA;
+  if (error || !data) {
+    return (
+      <div className="flex-1 p-8">
+        <div className="max-w-xl rounded-xl border border-red-200 bg-red-50 p-6 text-red-700">
+          <h1 className="text-lg font-semibold">Financial health unavailable</h1>
+          <p className="mt-2 text-sm">{error || 'No financial health data was returned.'}</p>
+          <button onClick={() => window.location.reload()} className="btn-primary mt-4">Try again</button>
+        </div>
+      </div>
+    );
+  }
+  const d = data;
 
   return (
     <div className="flex-1 p-4 md:p-6 lg:p-8 max-w-7xl">

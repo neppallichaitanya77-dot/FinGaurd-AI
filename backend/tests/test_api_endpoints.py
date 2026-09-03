@@ -103,6 +103,23 @@ def test_ai_assistant_chat_and_history(client, auth_headers):
     data = chat_res.json()
     assert "response" in data
     assert "FinGuard AI provides supportive guidance" in data["response"]
+    assert data["conversation_id"]
+    assert data["status"] == "FALLBACK_RESPONSE"
+    assert 2 <= len(data["suggested_questions"]) <= 4
+
+    followup = client.post(
+        "/api/ai/chat",
+        json={
+            "message": "How can I reduce it?",
+            "conversation_id": data["conversation_id"],
+            "previous_suggested_questions": data["suggested_questions"],
+        },
+        headers=auth_headers,
+    )
+    assert followup.status_code == 200
+    followup_data = followup.json()
+    assert 2 <= len(followup_data["suggested_questions"]) <= 4
+    assert set(followup_data["suggested_questions"]).isdisjoint(data["suggested_questions"])
 
     # Check history
     hist_res = client.get("/api/ai/history", headers=auth_headers)

@@ -30,9 +30,10 @@ services:
         condition: service_healthy
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-finguard}:${POSTGRES_PASSWORD:-finguard_secure_password}@postgres:5432/${POSTGRES_DB:-finguard}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-finguard_super_secret_jwt_key_2026}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
       - JWT_ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=1440
+      - ENVIRONMENT=production
       - LLM_ENABLED=${LLM_ENABLED:-false}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_API_BASE_URL=${LLM_API_BASE_URL:-https://api.openai.com/v1}
