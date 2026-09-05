@@ -3,12 +3,13 @@
 All indicator computations are deliberately kept in the backend so the
 frontend never performs business-logic / ML calculations.
 """
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
 from app.models.finance import Loan, LoanPayment, Transaction
-from app.models.profile import CustomerProfile
+from app.models.profile import Account, CustomerProfile
 
 
 def compute_dti(monthly_debt_payments: float, monthly_income: float) -> float:
@@ -67,7 +68,12 @@ def get_total_debt(db: Session, user_id: str) -> float:
 
 
 def get_upcoming_emi(db: Session, user_id: str) -> float:
-    loans = db.query(Loan).filter(Loan.user_id == user_id).all()
+    now = datetime.utcnow()
+    loans = (
+        db.query(Loan)
+        .filter(Loan.user_id == user_id, Loan.next_payment_date >= now)
+        .all()
+    )
     return sum(l.monthly_emi for l in loans)
 
 
@@ -79,13 +85,35 @@ def get_credit_utilization(db: Session, user_id: str) -> float:
 
 
 def get_balance(db: Session, user_id: str) -> float:
+    accounts = db.query(Account).filter(Account.user_id == user_id).all()
+    if accounts:
+        return sum(account.balance or 0 for account in accounts)
     profile = get_profile(db, user_id)
     return profile.account_balance if profile else 0.0
 
 
 def get_monthly_income(db: Session, user_id: str) -> float:
-    profile = get_profile(db, user_id)
-    return profile.monthly_income if profile else 0.0
+    start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return sum(
+        transaction.amount
+        for transaction in db.query(Transaction).filter(
+            Transaction.user_id == user_id,
+            Transaction.transaction_type == "credit",
+            Transaction.date >= start,
+        )
+    )
+
+
+def get_monthly_expenses(db: Session, user_id: str) -> float:
+    start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return sum(
+        abs(transaction.amount)
+        for transaction in db.query(Transaction).filter(
+            Transaction.user_id == user_id,
+            Transaction.transaction_type == "debit",
+            Transaction.date >= start,
+        )
+    )
 
 
 def get_balance_series(db: Session, user_id: str, days: int = 90) -> List[float]:
@@ -131,7 +159,7 @@ def get_expense_trend(db: Session, user_id: str) -> float:
 def compute_all_indicators(db: Session, user_id: str) -> Dict:
     """Compute the full set of financial indicators for a user."""
     profile = get_profile(db, user_id)
-    income = profile.monthly_income if profile else 0.0
+    income = get_monthly_income(db, user_id)
     balance = profile.account_balance if profile else 0.0
     delays = profile.payment_delays if profile else 0
     used = profile.credit_used if profile else 0
@@ -168,4 +196,5 @@ def compute_all_indicators(db: Session, user_id: str) -> Dict:
         "upcoming_emi": upcoming_emi,
         "account_balance": balance,
         "monthly_income": income,
+        "monthly_expenses": get_monthly_expenses(db, user_id),
     }

@@ -9,6 +9,7 @@ from app.services.financial_indicators import (
 from app.services.risk_engine import score_risk, risk_level_from_score
 from app.services.intervention_engine import evaluate_intervention
 from app.services.recommendation_engine import build_recommendations
+from app.services.financial_indicators import get_monthly_expenses, get_monthly_income
 
 
 def test_compute_dti():
@@ -41,6 +42,21 @@ def test_compute_expense_trend():
     assert compute_expense_trend(30000, 20000) == 50.0
     assert compute_expense_trend(20000, 20000) == 0.0
     assert compute_expense_trend(15000, 0) == 0.0  # Zero division guard
+
+
+def test_monthly_totals_are_derived_from_transactions(db_session):
+    from datetime import datetime
+    from app.models.finance import Transaction
+
+    user_id = "calculation-user"
+    db_session.add_all([
+        Transaction(user_id=user_id, date=datetime.utcnow(), description="Income", category="Income", amount=45000, transaction_type="credit", balance=45000),
+        Transaction(user_id=user_id, date=datetime.utcnow(), description="Expense", category="Food", amount=-20000, transaction_type="debit", balance=25000),
+    ])
+    db_session.flush()
+
+    assert get_monthly_income(db_session, user_id) == 45000
+    assert get_monthly_expenses(db_session, user_id) == 20000
 
 
 def test_risk_level_from_score():

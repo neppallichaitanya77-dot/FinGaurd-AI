@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, TrendingUp, TrendingDown } from 'lucide-react';
+import { AlertTriangle, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { dashboardAPI } from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -12,6 +12,7 @@ import ExpenseChart from '../components/ExpenseChart';
 import DebtChart from '../components/DebtChart';
 import AlertCard from '../components/AlertCard';
 import RecommendationCard from '../components/RecommendationCard';
+import { formatCurrency, formatDate } from '../utils/helpers';
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -148,6 +149,32 @@ export default function Dashboard() {
             )}
           </div>
         </div>
+      </div>
+
+      <div className="card mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">Recent Transactions</h3>
+          <Link to="/transactions" className="text-sm text-brand-600 hover:text-brand-700 flex items-center gap-1">
+            View all <ArrowRight className="w-4 h-4" />
+          </Link>
+        </div>
+        {dashboardData.recent_transactions?.length ? (
+          <div className="divide-y divide-gray-100">
+            {dashboardData.recent_transactions.map((transaction) => (
+              <div key={transaction.id} className="flex items-center justify-between py-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">{transaction.description}</p>
+                  <p className="text-xs text-gray-400">{transaction.category} · {formatDate(transaction.date)}</p>
+                </div>
+                <span className={`text-sm font-semibold ${transaction.amount >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {transaction.amount >= 0 ? '+' : '-'}{formatCurrency(Math.abs(transaction.amount))}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="py-6 text-center text-sm text-gray-400">No transactions recorded yet</p>
+        )}
       </div>
 
       <div className="card">

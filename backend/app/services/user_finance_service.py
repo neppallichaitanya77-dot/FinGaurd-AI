@@ -71,15 +71,13 @@ def get_recommendations(db: Session, user_id: str):
 
 
 def get_chart_data(db: Session, user_id: str) -> Dict:
-    from datetime import datetime, timedelta
+    from datetime import datetime
 
     txns = db.query(fi.Transaction).filter(fi.Transaction.user_id == user_id).all()
     balance = fi.get_balance(db, user_id)
 
     now = datetime.utcnow()
-    days = 30
     balance_chart = []
-    current = balance
     for transaction in sorted(txns, key=lambda item: item.date):
         balance_chart.append({
             "date": transaction.date.strftime("%Y-%m-%d"),
@@ -103,14 +101,10 @@ def get_chart_data(db: Session, user_id: str) -> Dict:
         for k, v in expense_chart.items()
     ]
 
-    # Debt chart (outstanding debt flat/trend over time)
-    debt = fi.get_total_debt(db, user_id)
-    debt_chart = [{"date": (now - timedelta(days=i)).strftime("%Y-%m-%d"), "debt": round(debt, 0)} for i in range(days, -1, -1)]
-
     return {
         "balance_chart": balance_chart,
         "expense_chart": expense_chart_list,
-        "debt_chart": debt_chart,
+        "debt_chart": [],
     }
 
 
@@ -125,7 +119,7 @@ def build_dashboard(db: Session, user_id: str) -> Dict:
     charts = get_chart_data(db, user_id)
 
     income = indicators["monthly_income"]
-    expenses = max(income * 0.7, 0)
+    expenses = indicators["monthly_expenses"]
     balance = indicators["account_balance"]
 
     def alert_to_dict(a):
@@ -150,10 +144,24 @@ def build_dashboard(db: Session, user_id: str) -> Dict:
             "created_at": r.created_at.isoformat() if r.created_at else None,
         }
 
-    # Expenses: approximate from expense trend data if available
-    chart_exp = charts["expense_chart"]
-    if chart_exp:
-        expenses = chart_exp[-1]["expenses"]
+    recent_transactions = (
+        db.query(fi.Transaction)
+        .filter(fi.Transaction.user_id == user_id)
+        .order_by(fi.Transaction.date.desc())
+        .limit(5)
+        .all()
+    )
+
+    def transaction_to_dict(transaction):
+        return {
+            "id": transaction.id,
+            "date": transaction.date.isoformat() if transaction.date else None,
+            "description": transaction.description,
+            "category": transaction.category,
+            "amount": transaction.amount,
+            "type": transaction.transaction_type,
+            "balance": transaction.balance,
+        }
 
     return {
         "health_score": risk["financial_health_score"],
@@ -169,6 +177,7 @@ def build_dashboard(db: Session, user_id: str) -> Dict:
         "upcoming_emi": indicators["upcoming_emi"],
         "alerts": [alert_to_dict(a) for a in alerts[:5]],
         "recommendations": [rec_to_dict(r) for r in recommendations[:5]],
+        "recent_transactions": [transaction_to_dict(t) for t in recent_transactions],
         "balance_chart": charts["balance_chart"],
         "expense_chart": charts["expense_chart"],
         "debt_chart": charts["debt_chart"],

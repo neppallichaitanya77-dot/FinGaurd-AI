@@ -109,6 +109,7 @@ class DashboardOut(BaseModel):
     upcoming_emi: float
     alerts: List[AlertOut] = []
     recommendations: List[RecommendationOut] = []
+    recent_transactions: List[dict] = []
     balance_chart: List[dict] = []
     expense_chart: List[dict] = []
     debt_chart: List[dict] = []
